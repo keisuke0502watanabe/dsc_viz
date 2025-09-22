@@ -659,8 +659,6 @@
                             parseThermalPrograms();
                             // Runを検出・分類
                             detectRunsFromThermalProgram();
-                            // 保存されたRun設定を読み込み
-                            loadRunSettings();
                             displaySections();
                             displayData();
                             displayRunInfo();
@@ -1611,7 +1609,7 @@
             Plotly.newPlot('runThermalPlot', traces, layout, {responsive: true});
         }
 
-        // Run設定を保存
+        // Run設定を保存（データファイルと同じディレクトリに）
         function saveRunSettings() {
             if (Object.keys(runData).length === 0) {
                 showStatus('保存するRun設定がありません', 'error');
@@ -1621,50 +1619,80 @@
             const settings = {
                 filenames: currentFilenames,
                 runData: runData,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                version: '1.0'
             };
 
             try {
-                localStorage.setItem('dsc_run_settings', JSON.stringify(settings));
-                showStatus('Run設定を保存しました');
+                // データファイルと同じディレクトリに保存するため、最初のファイル名からディレクトリを取得
+                const firstFileName = currentFilenames[0];
+                if (!firstFileName) {
+                    showStatus('ファイル名が取得できません', 'error');
+                    return;
+                }
+
+                // ファイル名からディレクトリパスを取得（実際のファイルシステムでは使用できないため、ファイル名ベースで生成）
+                const baseFileName = firstFileName.replace(/\.[^/.]+$/, ""); // 拡張子を除去
+                const settingsFileName = `${baseFileName}_run_settings.json`;
+                
+                // Blobを作成してダウンロード
+                const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = settingsFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showStatus(`Run設定を ${settingsFileName} として保存しました`, 'success');
             } catch (error) {
-                console.error('Failed to save run settings:', error);
+                console.error('Error saving run settings:', error);
                 showStatus('Run設定の保存に失敗しました', 'error');
             }
         }
 
-        // Run設定を読み込み
+        // Run設定を読み込み（ファイルから）
         function loadRunSettings() {
-            try {
-                const savedSettings = localStorage.getItem('dsc_run_settings');
-                if (!savedSettings) {
-                    console.log('No saved run settings found');
-                    return;
-                }
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = function(event) {
+                const file = event.target.files[0];
+                if (!file) return;
 
-                const settings = JSON.parse(savedSettings);
-                
-                // ファイル名が一致するかチェック
-                if (settings.filenames && settings.filenames.length === currentFilenames.length) {
-                    const filenamesMatch = settings.filenames.every((name, index) => 
-                        name === currentFilenames[index]
-                    );
-                    
-                    if (filenamesMatch && settings.runData) {
-                        runData = settings.runData;
-                        generateRunTimeInputs();
-                        displayRunInfo();
-                        updateRunThermalPlot();
-                        showStatus('保存されたRun設定を読み込みました');
-                        return;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const settings = JSON.parse(e.target.result);
+                        
+                        // ファイル名が一致するかチェック
+                        if (settings.filenames && settings.filenames.length === currentFilenames.length) {
+                            const filenamesMatch = settings.filenames.every((name, index) => 
+                                name === currentFilenames[index]
+                            );
+                            
+                            if (filenamesMatch && settings.runData) {
+                                runData = settings.runData;
+                                generateRunTimeInputs();
+                                displayRunInfo();
+                                updateRunThermalPlot();
+                                showStatus('Run設定を読み込みました', 'success');
+                            } else {
+                                showStatus('ファイル名が一致しません', 'error');
+                            }
+                        } else {
+                            showStatus('ファイル数が一致しません', 'error');
+                        }
+                    } catch (error) {
+                        console.error('Error parsing run settings file:', error);
+                        showStatus('Run設定ファイルの解析に失敗しました', 'error');
                     }
-                }
-                
-                console.log('Saved run settings do not match current files');
-            } catch (error) {
-                console.error('Failed to load run settings:', error);
-                showStatus('Run設定の読み込みに失敗しました', 'error');
-            }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
         }
 
         // Run設定をエクスポート
@@ -1682,17 +1710,28 @@
             };
 
             try {
+                // データファイルと同じディレクトリに保存するため、最初のファイル名からディレクトリを取得
+                const firstFileName = currentFilenames[0];
+                if (!firstFileName) {
+                    showStatus('ファイル名が取得できません', 'error');
+                    return;
+                }
+
+                // ファイル名からディレクトリパスを取得（実際のファイルシステムでは使用できないため、ファイル名ベースで生成）
+                const baseFileName = firstFileName.replace(/\.[^/.]+$/, ""); // 拡張子を除去
+                const settingsFileName = `${baseFileName}_run_settings_${new Date().toISOString().split('T')[0]}.json`;
+                
                 const dataStr = JSON.stringify(settings, null, 2);
                 const dataBlob = new Blob([dataStr], {type: 'application/json'});
                 
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(dataBlob);
-                link.download = `dsc_run_settings_${new Date().toISOString().split('T')[0]}.json`;
+                link.download = settingsFileName;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
                 
-                showStatus('Run設定をエクスポートしました');
+                showStatus(`Run設定を ${settingsFileName} としてエクスポートしました`, 'success');
             } catch (error) {
                 console.error('Failed to export run settings:', error);
                 showStatus('Run設定のエクスポートに失敗しました', 'error');
