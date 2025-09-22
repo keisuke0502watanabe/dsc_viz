@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DSC Advanced Visualization - Offline Version</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: 'Times New Roman', serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .file-input {
+            margin: 20px 0;
+            padding: 10px;
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .plot-container {
+            margin: 20px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        input[type="file"] {
+            margin: 10px;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .input-group {
+            margin: 10px 0;
+        }
+        .input-group label {
+            display: inline-block;
+            width: 150px;
+            font-weight: bold;
+        }
+        .input-group input {
+            width: 100px;
+            margin: 0 5px;
+        }
+        .data-table {
+            margin: 20px 0;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DSC Advanced Visualization - Offline Version</h1>
+        
+        <div class="file-input">
+            <h3>データファイルをアップロード</h3>
+            <input type="file" id="fileInput" accept=".txt,.csv" multiple>
+            <p>Shimadzu DSCのテキストファイルを選択してください</p>
+        </div>
+
+        <div class="controls">
+            <h3>制御パネル</h3>
+            <button onclick="loadData()">データ読み込み</button>
+            <button onclick="plotThermalProfile()">温度プロファイル表示</button>
+            <button onclick="plotDscCurve()">DSCカーブ表示</button>
+            <button onclick="plotCombined()">統合表示</button>
+            <button onclick="plotWithOffsets()">オフセット表示</button>
+            <button onclick="plotPeakAnalysis()">ピーク解析表示</button>
+            <button onclick="exportHTML()">HTML出力</button>
+        </div>
+
+        <div class="controls">
+            <h3>データ処理設定</h3>
+            <div class="input-group">
+                <label>時間範囲設定:</label>
+                <input type="number" id="tmin1" placeholder="tmin1" value="0">
+                <input type="number" id="tmax1" placeholder="tmax1" value="900">
+                <input type="number" id="tmin2" placeholder="tmin2" value="1180">
+                <input type="number" id="tmax2" placeholder="tmax2" value="2500">
+            </div>
+            <div class="input-group">
+                <label>温度範囲設定:</label>
+                <input type="number" id="Tmin" placeholder="Tmin" value="0">
+                <input type="number" id="Tmax" placeholder="Tmax" value="305">
+            </div>
+            <div class="input-group">
+                <label>オフセット設定:</label>
+                <input type="number" id="offset" placeholder="offset" value="0">
+                <input type="number" id="scale" placeholder="scale" value="1">
+            </div>
+        </div>
+
+        <div id="status" class="status" style="display: none;"></div>
+
+        <div class="data-table" id="dataTable" style="display: none;">
+            <h3>読み込み済みデータ</h3>
+            <table id="dataTableContent">
+                <thead>
+                    <tr>
+                        <th>ファイル名</th>
+                        <th>データ点数</th>
+                        <th>時間範囲</th>
+                        <th>温度範囲</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="plot-container">
+            <div id="plot1"></div>
+        </div>
+        <div class="plot-container">
+            <div id="plot2"></div>
+        </div>
+    </div>
+
+    <script>
+        // グローバル変数
+        let loadedData = {};
+        let processedData = {};
+
+        // ステータス表示関数
+        function showStatus(message, type = 'success') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 3000);
+        }
+
+        // ファイル読み込み関数
+        function loadData() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            
+            if (files.length === 0) {
+                showStatus('ファイルを選択してください', 'error');
+                return;
+            }
+
+            loadedData = {};
+            let loadedCount = 0;
+
+            Array.from(files).forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const text = e.target.result;
+                        const data = parseShimadzuData(text, file.name);
+                        loadedData[index] = data;
+                        loadedCount++;
+                        
+                        if (loadedCount === files.length) {
+                            showStatus(`${loadedCount}個のファイルを読み込みました`);
+                            updateDataTable();
+                            console.log('Loaded data:', loadedData);
+                        }
+                    } catch (error) {
+                        showStatus(`ファイル ${file.name} の読み込みに失敗しました: ${error.message}`, 'error');
+                    }
+                };
+                reader.readAsText(file, 'UTF-16');
+            });
+        }
+
+        // Shimadzu DSCデータのパース関数
+        function parseShimadzuData(text, filename) {
+            const lines = text.split('\n');
+            let dataStartIndex = -1;
+            
+            // "Time\tTemp\tDSC"を含む行を探す
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes("Time\tTemp\tDSC")) {
+                    dataStartIndex = i;
+                    break;
+                }
+            }
+            
+            if (dataStartIndex === -1) {
+                throw new Error('データヘッダーが見つかりません');
+            }
+
+            // データを抽出
+            const dataLines = lines.slice(dataStartIndex + 1).filter(line => line.trim());
+            const data = [];
+            
+            dataLines.forEach(line => {
+                const parts = line.split('\t');
+                if (parts.length >= 3) {
+                    const time = parseFloat(parts[0]);
+                    const temp = parseFloat(parts[1]) + 273.15; // ℃→K変換
+                    const dsc = parseFloat(parts[2]);
+                    
+                    if (!isNaN(time) && !isNaN(temp) && !isNaN(dsc)) {
+                        data.push({
+                            time: time,
+                            temp: temp,
+                            dsc: dsc,
+                            heatOrCool: 'isothermal',
+                            filename: filename,
+                            numOfRun: 1
+                        });
+                    }
+                }
+            });
+
+            return data;
+        }
+
+        // データテーブル更新
+        function updateDataTable() {
+            const tableBody = document.querySelector('#dataTableContent tbody');
+            tableBody.innerHTML = '';
+            
+            Object.values(loadedData).forEach((data, index) => {
+                const row = document.createElement('tr');
+                const timeRange = `${data[0].time.toFixed(1)} - ${data[data.length-1].time.toFixed(1)}`;
+                const tempRange = `${data[0].temp.toFixed(1)} - ${data[data.length-1].temp.toFixed(1)}`;
+                
+                row.innerHTML = `
+                    <td>File ${index + 1}</td>
+                    <td>${data.length}</td>
+                    <td>${timeRange}</td>
+                    <td>${tempRange}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+            
+            document.getElementById('dataTable').style.display = 'block';
+        }
+
+        // 時間範囲でデータを抽出する関数
+        function makeInsetByTime(data, tmin, tmax, offset, scale) {
+            const filtered = data.filter(d => d.time >= tmin && d.time <= tmax);
+            if (filtered.length === 0) return [];
+            
+            // 基準値を計算（最小値または最大値の絶対値が小さい方）
+            const dscValues = filtered.map(d => d.dsc);
+            const minDsc = Math.min(...dscValues);
+            const maxDsc = Math.max(...dscValues);
+            const baseline = Math.abs(minDsc) < Math.abs(maxDsc) ? minDsc : maxDsc;
+            
+            // オフセットとスケールを適用
+            return filtered.map(d => ({
+                ...d,
+                dsc: (d.dsc - baseline) * scale + offset
+            }));
+        }
+
+        // 温度範囲でデータを抽出する関数
+        function makeInsetByTemp(data, Tmin, Tmax, offset, scale) {
+            const filtered = data.filter(d => d.temp >= Tmin && d.temp <= Tmax);
+            if (filtered.length === 0) return [];
+            
+            // 基準値を計算
+            const dscValues = filtered.map(d => d.dsc);
+            const minDsc = Math.min(...dscValues);
+            const maxDsc = Math.max(...dscValues);
+            const baseline = Math.abs(minDsc) < Math.abs(maxDsc) ? minDsc : maxDsc;
+            
+            // オフセットとスケールを適用
+            return filtered.map(d => ({
+                ...d,
+                dsc: (d.dsc - baseline) * scale + offset
+            }));
+        }
+
+        // オフセット変更関数
+        function changeOffset(data, offset) {
+            return data.map(d => ({
+                ...d,
+                dsc: d.dsc + offset
+            }));
+        }
+
+        // 温度プロファイル表示
+        function plotThermalProfile() {
+            if (Object.keys(loadedData).length === 0) {
+                showStatus('データを先に読み込んでください', 'error');
+                return;
+            }
+
+            const traces = [];
+            const colors = ['green', 'red', 'blue'];
+            let colorIndex = 0;
+
+            Object.values(loadedData).forEach((data, index) => {
+                const trace = {
+                    x: data.map(d => d.time),
+                    y: data.map(d => d.temp),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: `File ${index + 1}`,
+                    marker: { color: colors[colorIndex % colors.length], size: 3 }
+                };
+                traces.push(trace);
+                colorIndex++;
+            });
+
+            const layout = {
+                title: 'Thermal Profile (Color: Heat/Cool, Symbol: Cycle)',
+                xaxis: { 
+                    title: 'Time (sec)',
+                    tickfont: { size: 24 }
+                },
+                yaxis: { 
+                    title: 'Temperature (K)',
+                    tickfont: { size: 24 }
+                },
+                font: { family: 'Times New Roman', size: 24 }
+            };
+
+            Plotly.newPlot('plot1', traces, layout);
+        }
+
+        // DSCカーブ表示
+        function plotDscCurve() {
+            if (Object.keys(loadedData).length === 0) {
+                showStatus('データを先に読み込んでください', 'error');
+                return;
+            }
+
+            const traces = [];
+            const colors = ['green', 'red', 'blue'];
+            let colorIndex = 0;
+
+            Object.values(loadedData).forEach((data, index) => {
+                const trace = {
+                    x: data.map(d => d.temp),
+                    y: data.map(d => d.dsc),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: `File ${index + 1}`,
+                    marker: { color: colors[colorIndex % colors.length], size: 3 }
+                };
+                traces.push(trace);
+                colorIndex++;
+            });
+
+            const layout = {
+                title: 'DSC Curve (Color: Heat/Cool, Offset: Cycle)',
+                xaxis: { 
+                    title: 'Temperature (K)',
+                    tickfont: { size: 24 }
+                },
+                yaxis: { 
+                    title: 'DSC (uW) - cycle offset applied',
+                    showticklabels: false
+                },
+                font: { family: 'Times New Roman', size: 24 }
+            };
+
+            Plotly.newPlot('plot2', traces, layout);
+        }
+
+        // 統合表示
+        function plotCombined() {
+            if (Object.keys(loadedData).length === 0) {
+                showStatus('データを先に読み込んでください', 'error');
+                return;
+            }
+
+            // 温度プロファイル
+            const thermalTraces = [];
+            const dscTraces = [];
+            const colors = ['green', 'red', 'blue'];
+            let colorIndex = 0;
+
+            Object.values(loadedData).forEach((data, index) => {
+                const thermalTrace = {
+                    x: data.map(d => d.time),
+                    y: data.map(d => d.temp),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: `Thermal ${index + 1}`,
+                    marker: { color: colors[colorIndex % colors.length], size: 3 }
+                };
+                thermalTraces.push(thermalTrace);
+
+                const dscTrace = {
+                    x: data.map(d => d.temp),
+                    y: data.map(d => d.dsc),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: `DSC ${index + 1}`,
+                    marker: { color: colors[colorIndex % colors.length], size: 3 }
+                };
+                dscTraces.push(dscTrace);
+                colorIndex++;
+            });
+
+            const thermalLayout = {
+                title: 'Thermal Profile',
+                xaxis: { 
+                    title: 'Time (sec)',
+                    tickfont: { size: 24 }
+                },
+                yaxis: { 
+                    title: 'Temperature (K)',
+                    tickfont: { size: 24 }
+                },
+                font: { family: 'Times New Roman', size: 24 }
+            };
+
+            const dscLayout = {
+                title: 'DSC Curve',
+                xaxis: { 
+                    title: 'Temperature (K)',
+                    tickfont: { size: 24 }
+                },
+                yaxis: { 
+                    title: 'DSC (uW)',
+                    showticklabels: false
+                },
+                font: { family: 'Times New Roman', size: 24 }
+            };
+
+            Plotly.newPlot('plot1', thermalTraces, thermalLayout);
+            Plotly.newPlot('plot2', dscTraces, dscLayout);
+        }
+
+        // オフセット表示
+        function plotWithOffsets() {
+            if (Object.keys(loadedData).length === 0) {
+                showStatus('データを先に読み込んでください', 'error');
+                return;
+            }
+
+            const tmin1 = parseFloat(document.getElementById('tmin1').value);
+            const tmax1 = parseFloat(document.getElementById('tmax1').value);
+            const tmin2 = parseFloat(document.getElementById('tmin2').value);
+            const tmax2 = parseFloat(document.getElementById('tmax2').value);
+            const Tmin = parseFloat(document.getElementById('Tmin').value);
+            const Tmax = parseFloat(document.getElementById('Tmax').value);
+            const offset = parseFloat(document.getElementById('offset').value);
+            const scale = parseFloat(document.getElementById('scale').value);
+
+            const traces = [];
+            const colors = ['blue', 'red', 'green'];
+            const labels = ['cool', 'heat', 'isothermal'];
+
+            Object.values(loadedData).forEach((data, index) => {
+                // 冷却部分
+                const coolData = makeInsetByTime(data, tmin1, tmax1, offset, scale);
+                if (coolData.length > 0) {
+                    traces.push({
+                        x: coolData.map(d => d.temp),
+                        y: coolData.map(d => d.dsc),
+                        mode: 'lines',
+                        type: 'scatter',
+                        name: `Run=${index+1} cool`,
+                        line: { color: colors[0] }
+                    });
+                }
+
+                // 昇温部分
+                const heatData = makeInsetByTime(data, tmin2, tmax2, offset, scale);
+                if (heatData.length > 0) {
+                    traces.push({
+                        x: heatData.map(d => d.temp),
+                        y: heatData.map(d => d.dsc),
+                        mode: 'lines',
+                        type: 'scatter',
+                        name: `Run=${index+1} heat`,
+                        line: { color: colors[1] }
+                    });
+                }
+
+                // 等温部分（接続線）
+                if (coolData.length > 0 && heatData.length > 0) {
+                    const lastCool = coolData[coolData.length - 1];
+                    const firstHeat = heatData[0];
+                    traces.push({
+                        x: [lastCool.temp, firstHeat.temp],
+                        y: [lastCool.dsc, firstHeat.dsc],
+                        mode: 'lines',
+                        type: 'scatter',
+                        name: 'iso',
+                        line: { color: colors[2] },
+                        showlegend: false
+                    });
+                }
+            });
+
+            const layout = {
+                title: 'DSC Curve with Offsets',
+                xaxis: { 
+                    title: 'Temperature (K)',
+                    tickfont: { size: 24 }
+                },
+                yaxis: { 
+                    title: 'DSC (uW)',
+                    showticklabels: false
+                },
+                font: { family: 'Times New Roman', size: 24 },
+                height: 400,
+                width: 600
+            };
+
+            Plotly.newPlot('plot2', traces, layout);
+        }
+
+        // ピーク解析表示
+        function plotPeakAnalysis() {
+            if (Object.keys(loadedData).length === 0) {
+                showStatus('データを先に読み込んでください', 'error');
+                return;
+            }
+
+            const Tmin = parseFloat(document.getElementById('Tmin').value);
+            const Tmax = parseFloat(document.getElementById('Tmax').value);
+            const offset = parseFloat(document.getElementById('offset').value);
+            const scale = parseFloat(document.getElementById('scale').value);
+
+            const traces = [];
+            const colors = ['blue', 'red', 'teal', 'plum', 'orange'];
+
+            Object.values(loadedData).forEach((data, index) => {
+                // 全体データ
+                const filteredData = data.filter(d => d.temp >= Tmin && d.temp <= Tmax);
+                if (filteredData.length > 0) {
+                    traces.push({
+                        x: filteredData.map(d => d.temp),
+                        y: filteredData.map(d => d.dsc),
+                        mode: 'lines',
+                        type: 'scatter',
+                        name: `Series ${index+1}`,
+                        line: { color: colors[index % colors.length] }
+                    });
+                }
+
+                // ピーク部分の拡大（155-250K範囲）
+                const peakData = makeInsetByTemp(data, 155, 250, offset + 30, 20);
+                if (peakData.length > 0) {
+                    traces.push({
+                        x: peakData.map(d => d.temp),
+                        y: peakData.map(d => d.dsc),
+                        mode: 'lines',
+                        type: 'scatter',
+                        name: `Peak ${index+1} insert`,
+                        line: { color: colors[(index + 2) % colors.length] }
+                    });
+                }
+            });
+
+            const layout = {
+                title: 'DSC Peak Analysis',
+                xaxis: { 
+                    title: 'Temperature (K)',
+                    tickfont: { size: 24 },
+                    range: [140, 310]
+                },
+                yaxis: { 
+                    title: 'DSC (uW)',
+                    showticklabels: false
+                },
+                font: { family: 'Times New Roman', size: 24 },
+                height: 400,
+                width: 600
+            };
+
+            Plotly.newPlot('plot2', traces, layout);
+        }
+
+        // HTML出力
+        function exportHTML() {
+            if (Object.keys(loadedData).length === 0) {
+                showStatus('データを先に読み込んでください', 'error');
+                return;
+            }
+
+            // 現在のプロットをHTMLとして出力
+            const plot1Html = document.getElementById('plot1').innerHTML;
+            const plot2Html = document.getElementById('plot2').innerHTML;
+            
+            const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DSC Plots Export</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <h1>DSC Data Visualization Export</h1>
+    <div id="plot1">${plot1Html}</div>
+    <div id="plot2">${plot2Html}</div>
+</body>
+</html>`;
+
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'dsc_plots_export.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showStatus('HTMLファイルを出力しました');
+        }
+
+        // ページ読み込み時の初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            showStatus('DSCデータ可視化ツールが準備できました');
+        });
+    </script>
+</body>
+</html>

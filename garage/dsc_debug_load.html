@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DSC Data Loader - Debug Version</title>
+    <style>
+        body {
+            font-family: 'Times New Roman', serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .file-input {
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            text-align: center;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .debug-section {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .raw-lines {
+            background-color: #e9ecef;
+            padding: 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        .data-table th, .data-table td {
+            border: 1px solid #ddd;
+            padding: 4px;
+            text-align: left;
+        }
+        .data-table th {
+            background-color: #f2f2f2;
+        }
+        .data-display {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DSC Data Loader - Debug Version</h1>
+        
+        <div class="file-input">
+            <h3>データファイルをアップロード</h3>
+            <input type="file" id="fileInput" accept=".txt" multiple>
+            <p>Shimadzu DSCのテキストファイル（.txt）を選択してください</p>
+            <button onclick="loadData()">データ読み込み</button>
+        </div>
+
+        <div id="status" class="status" style="display: none;"></div>
+
+        <div id="debugSection" class="debug-section" style="display: none;">
+            <h3>ファイル内容デバッグ</h3>
+            <div id="fileInfo"></div>
+            <h4>ファイルの最初の20行:</h4>
+            <div id="rawLines" class="raw-lines"></div>
+            <h4>データヘッダー検索結果:</h4>
+            <div id="headerInfo"></div>
+        </div>
+
+        <div id="dataDisplay" class="data-display" style="display: none;">
+            <h3>読み込み済みデータ</h3>
+            <div id="dataTable"></div>
+        </div>
+    </div>
+
+    <script>
+        // グローバル変数
+        let loadedData = {};
+
+        // ステータス表示関数
+        function showStatus(message, type = 'success') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+
+        // ファイル読み込み関数
+        function loadData() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            
+            if (files.length === 0) {
+                showStatus('ファイルを選択してください', 'error');
+                return;
+            }
+
+            loadedData = {};
+            let loadedCount = 0;
+
+            Array.from(files).forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const text = e.target.result;
+                        console.log(`Loading file ${index + 1}: ${file.name}`);
+                        console.log('File size:', text.length, 'characters');
+                        
+                        // デバッグ情報を表示
+                        displayDebugInfo(text, file.name, index);
+                        
+                        const data = parseShimadzuData(text, file.name);
+                        loadedData[index] = data;
+                        loadedCount++;
+                        
+                        console.log(`File ${index + 1} loaded:`, data.length, 'data points');
+                        
+                        if (loadedCount === files.length) {
+                            showStatus(`${loadedCount}個のファイルを読み込みました`);
+                            displayData();
+                        }
+                    } catch (error) {
+                        console.error(`Error loading file ${file.name}:`, error);
+                        showStatus(`ファイル ${file.name} の読み込みに失敗しました: ${error.message}`, 'error');
+                    }
+                };
+                
+                // UTF-16で読み込みを試す
+                reader.readAsText(file, 'UTF-16');
+            });
+        }
+
+        // デバッグ情報表示関数
+        function displayDebugInfo(text, filename, fileIndex) {
+            const debugSection = document.getElementById('debugSection');
+            const fileInfo = document.getElementById('fileInfo');
+            const rawLines = document.getElementById('rawLines');
+            const headerInfo = document.getElementById('headerInfo');
+            
+            // ファイル情報
+            fileInfo.innerHTML = `
+                <p><strong>ファイル名:</strong> ${filename}</p>
+                <p><strong>ファイルサイズ:</strong> ${text.length} 文字</p>
+                <p><strong>ファイル番号:</strong> ${fileIndex + 1}</p>
+            `;
+            
+            // 最初の20行を表示
+            const lines = text.split('\n');
+            const first20Lines = lines.slice(0, 20).map((line, i) => 
+                `行 ${i + 1}: ${line}`
+            ).join('\n');
+            rawLines.textContent = first20Lines;
+            
+            // ヘッダー検索結果
+            let headerSearchResult = 'ヘッダー検索結果:\n';
+            for (let i = 0; i < Math.min(30, lines.length); i++) {
+                const line = lines[i];
+                if (line.toLowerCase().includes('time') || 
+                    line.toLowerCase().includes('temp') || 
+                    line.toLowerCase().includes('dsc')) {
+                    headerSearchResult += `行 ${i + 1}: ${line}\n`;
+                }
+            }
+            headerInfo.textContent = headerSearchResult;
+            
+            debugSection.style.display = 'block';
+        }
+
+        // Shimadzu DSCデータのパース関数
+        function parseShimadzuData(text, filename) {
+            console.log('Parsing file:', filename);
+            
+            const lines = text.split('\n');
+            console.log('Total lines:', lines.length);
+            
+            // 最初の10行を表示してデバッグ
+            console.log('First 10 lines:');
+            for (let i = 0; i < Math.min(10, lines.length); i++) {
+                console.log(`Line ${i + 1}:`, lines[i]);
+            }
+            
+            let dataStartIndex = -1;
+            
+            // "Time\tTemp\tDSC"を含む行を探す
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes("Time\tTemp\tDSC")) {
+                    dataStartIndex = i;
+                    console.log('Data header found at line:', i + 1);
+                    break;
+                }
+            }
+            
+            // より柔軟な検索
+            if (dataStartIndex === -1) {
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].toLowerCase();
+                    if (line.includes('time') && line.includes('temp') && line.includes('dsc')) {
+                        dataStartIndex = i;
+                        console.log('Data header found at line (flexible search):', i + 1);
+                        break;
+                    }
+                }
+            }
+            
+            if (dataStartIndex === -1) {
+                throw new Error('データヘッダーが見つかりません。ファイル形式を確認してください。');
+            }
+
+            // データを抽出（ヘッダーの次の行から開始）
+            const dataLines = lines.slice(dataStartIndex + 1).filter(line => line.trim());
+            console.log('Data lines found:', dataLines.length);
+            
+            const data = [];
+            
+            dataLines.forEach((line, lineIndex) => {
+                const parts = line.split('\t');
+                if (parts.length >= 3) {
+                    const time = parseFloat(parts[0]);
+                    const temp = parseFloat(parts[1]) + 273.15; // ℃→K変換
+                    const dsc = parseFloat(parts[2]);
+                    
+                    if (!isNaN(time) && !isNaN(temp) && !isNaN(dsc)) {
+                        data.push({
+                            time: time,
+                            temp: temp,
+                            dsc: dsc,
+                            heatOrCool: 'isothermal',
+                            filename: filename,
+                            numOfRun: 1
+                        });
+                    }
+                }
+            });
+
+            console.log('Parsed data points:', data.length);
+            if (data.length > 0) {
+                console.log('First data point:', data[0]);
+                console.log('Last data point:', data[data.length - 1]);
+            }
+            
+            return data;
+        }
+
+        // データ表示関数
+        function displayData() {
+            const dataDisplay = document.getElementById('dataDisplay');
+            const dataTable = document.getElementById('dataTable');
+            
+            let html = '<table class="data-table">';
+            html += '<thead><tr><th>ファイル</th><th>データ点数</th><th>時間範囲</th><th>温度範囲</th><th>DSC範囲</th></tr></thead>';
+            html += '<tbody>';
+            
+            Object.keys(loadedData).forEach(key => {
+                const data = loadedData[key];
+                const timeRange = `${data[0].time.toFixed(1)} - ${data[data.length-1].time.toFixed(1)}`;
+                const tempRange = `${data[0].temp.toFixed(1)} - ${data[data.length-1].temp.toFixed(1)}`;
+                const dscValues = data.map(d => d.dsc);
+                const dscRange = `${Math.min(...dscValues).toFixed(1)} - ${Math.max(...dscValues).toFixed(1)}`;
+                
+                html += `<tr>
+                    <td>File ${parseInt(key)+1}</td>
+                    <td>${data.length}</td>
+                    <td>${timeRange}</td>
+                    <td>${tempRange}</td>
+                    <td>${dscRange}</td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table>';
+            dataTable.innerHTML = html;
+            dataDisplay.style.display = 'block';
+        }
+
+        // ページ読み込み時の初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            showStatus('DSCデータローダーが準備できました');
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DSC Dual Plot - All Runs</title>
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Times New Roman', serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .file-input {
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            text-align: center;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .plot-container {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .plot-controls {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+        }
+        .plot-controls label {
+            margin-right: 10px;
+        }
+        .plot-controls input, .plot-controls select {
+            margin-right: 15px;
+        }
+        .plot-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .plot-item {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            background-color: white;
+        }
+        .plot-item h4 {
+            margin-top: 0;
+            text-align: center;
+            color: #007bff;
+        }
+        .run-settings {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #d1ecf1;
+            border-radius: 5px;
+            border: 1px solid #bee5eb;
+        }
+        .run-settings h5 {
+            margin-top: 0;
+            color: #0c5460;
+        }
+        .run-offset-input {
+            display: inline-block;
+            margin: 5px;
+        }
+        .run-offset-input label {
+            display: block;
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+        .run-offset-input input {
+            width: 60px;
+            padding: 2px;
+        }
+        .dsc-subplot-container {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            background-color: white;
+        }
+        .dsc-subplot-container h4 {
+            margin-top: 0;
+            text-align: center;
+            color: #007bff;
+        }
+        @media (max-width: 1200px) {
+            .plot-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DSC Dual Plot - All Runs</h1>
+        
+        <div class="file-input">
+            <h3>データファイルをアップロード</h3>
+            <input type="file" id="fileInput" accept=".txt" multiple>
+            <p>Shimadzu DSCのテキストファイル（.txt）を選択してください</p>
+            <button onclick="loadData()">データ読み込み</button>
+        </div>
+
+        <div id="status" class="status" style="display: none;"></div>
+
+        <div id="plotSection" class="plot-container">
+            <h3>プロット表示</h3>
+            <div class="plot-controls">
+                <label>表示タイプ:</label>
+                <select id="plotType">
+                    <option value="scatter">散布図</option>
+                    <option value="line">線グラフ</option>
+                    <option value="both">散布図+線</option>
+                </select>
+                <label>温度範囲:</label>
+                <input type="number" id="tempMin" placeholder="最小温度" value="">
+                <input type="number" id="tempMax" placeholder="最大温度" value="">
+                <label>DSC範囲:</label>
+                <input type="number" id="dscMin" placeholder="最小DSC" value="">
+                <input type="number" id="dscMax" placeholder="最大DSC" value="">
+                <label>時間範囲:</label>
+                <input type="number" id="timeMin" placeholder="最小時間" value="">
+                <input type="number" id="timeMax" placeholder="最大時間" value="">
+                <button onclick="updatePlot()">プロット更新</button>
+                <button onclick="resetPlot()">リセット</button>
+            </div>
+            
+            <div class="run-settings">
+                <h5>Runオフセット設定</h5>
+                <div id="runOffsetInputs">
+                    <!-- 動的に生成される -->
+                </div>
+            </div>
+            
+            <div class="plot-grid">
+                <div class="plot-item">
+                    <h4>熱履歴プロファイル (全Run同時表示)</h4>
+                    <div id="thermalPlot"></div>
+                </div>
+                <div class="dsc-subplot-container">
+                    <h4>DSC曲線</h4>
+                    <div id="dscPlot"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // グローバル変数
+        let loadedData = {};
+        let fileSections = {};
+        let runData = {};
+
+        // ステータス表示関数
+        function showStatus(message, type = 'success') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+
+        // ファイル読み込み関数
+        function loadData() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            
+            if (files.length === 0) {
+                showStatus('ファイルを選択してください', 'error');
+                return;
+            }
+
+            loadedData = {};
+            fileSections = {};
+            runData = {};
+            let loadedCount = 0;
+
+            Array.from(files).forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const text = e.target.result;
+                        console.log(`Loading file ${index + 1}: ${file.name}`);
+                        
+                        // ファイルを3つのセクションに分割
+                        const sections = parseFileSections(text, file.name);
+                        fileSections[index] = sections;
+                        
+                        // データ部分をパース
+                        const data = parseShimadzuData(text, file.name);
+                        loadedData[index] = data;
+                        loadedCount++;
+                        
+                        if (loadedCount === files.length) {
+                            showStatus(`${loadedCount}個のファイルを読み込みました`);
+                            // Runを検出・分類
+                            detectRuns();
+                            generateRunOffsetInputs();
+                            setAutoRanges();
+                            updatePlot();
+                            document.getElementById('plotSection').style.display = 'block';
+                        }
+                    } catch (error) {
+                        console.error(`Error loading file ${file.name}:`, error);
+                        showStatus(`ファイル ${file.name} の読み込みに失敗しました: ${error.message}`, 'error');
+                    }
+                };
+                
+                reader.readAsText(file, 'UTF-16');
+            });
+        }
+
+        // ファイルを3つのセクションに分割する関数
+        function parseFileSections(text, filename) {
+            const lines = text.split('\n');
+            const sections = {
+                experimental: [],
+                thermal: [],
+                data: []
+            };
+            
+            let currentSection = 'experimental';
+            let dataStartIndex = -1;
+            let thermalStartIndex = -1;
+            
+            // 熱履歴の開始行を探す
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].toLowerCase();
+                if (line.includes('加熱速度') || line.includes('ホールド温度') || 
+                    line.includes('ホールド時間') || line.includes('ln2') || 
+                    line.includes('ガス')) {
+                    thermalStartIndex = i;
+                    break;
+                }
+            }
+            
+            // データヘッダーを探す
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes("Time\tTemp\tDSC")) {
+                    dataStartIndex = i;
+                    break;
+                }
+            }
+            
+            if (dataStartIndex === -1) {
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].toLowerCase();
+                    if (line.includes('time') && line.includes('temp') && line.includes('dsc')) {
+                        dataStartIndex = i;
+                        break;
+                    }
+                }
+            }
+            
+            // セクション分け
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                
+                if (i === dataStartIndex) {
+                    currentSection = 'data';
+                    sections.data.push(line);
+                } else if (i < dataStartIndex) {
+                    if (thermalStartIndex !== -1 && i >= thermalStartIndex) {
+                        currentSection = 'thermal';
+                    } else {
+                        currentSection = 'experimental';
+                    }
+                    sections[currentSection].push(line);
+                } else {
+                    sections.data.push(line);
+                }
+            }
+            
+            return sections;
+        }
+
+        // Runを検出・分類する関数
+        function detectRuns() {
+            runData = {};
+            
+            Object.keys(loadedData).forEach(fileKey => {
+                const data = loadedData[fileKey];
+                const runs = [];
+                let currentRun = 1;
+                let runStartTime = data[0].time;
+                
+                // 温度の変化率を計算してRunの境界を検出
+                for (let i = 1; i < data.length; i++) {
+                    const prevTemp = data[i-1].temp;
+                    const currTemp = data[i].temp;
+                    const timeDiff = data[i].time - data[i-1].time;
+                    const tempDiff = currTemp - prevTemp;
+                    const tempRate = tempDiff / timeDiff;
+                    
+                    if (i > 1) {
+                        const prevTempRate = (data[i-1].temp - data[i-2].temp) / (data[i-1].time - data[i-2].time);
+                        const rateChange = Math.abs(tempRate - prevTempRate);
+                        
+                        if (rateChange > 0.1 && Math.abs(tempRate) < 0.01) {
+                            runs.push({
+                                runNumber: currentRun,
+                                startTime: runStartTime,
+                                endTime: data[i-1].time,
+                                data: data.slice(runs.length > 0 ? runs[runs.length-1].endIndex + 1 : 0, i)
+                            });
+                            currentRun++;
+                            runStartTime = data[i].time;
+                        }
+                    }
+                }
+                
+                // 最後のRunを追加
+                runs.push({
+                    runNumber: currentRun,
+                    startTime: runStartTime,
+                    endTime: data[data.length-1].time,
+                    data: data.slice(runs.length > 0 ? runs[runs.length-1].endIndex + 1 : 0)
+                });
+                
+                runData[fileKey] = runs;
+            });
+            
+            console.log('Detected runs:', runData);
+        }
+
+        // Runオフセット設定を生成
+        function generateRunOffsetInputs() {
+            const runOffsetInputs = document.getElementById('runOffsetInputs');
+            let html = '';
+            
+            Object.keys(runData).forEach(fileKey => {
+                const runs = runData[fileKey];
+                html += `<h6>File ${parseInt(fileKey) + 1}</h6>`;
+                
+                runs.forEach(run => {
+                    html += `
+                        <div class="run-offset-input">
+                            <label>Run-${run.runNumber}:</label>
+                            <input type="number" id="run_${fileKey}_${run.runNumber}_offset" 
+                                   value="${(run.runNumber - 1) * -40}" step="10">
+                        </div>
+                    `;
+                });
+                html += '<br>';
+            });
+            
+            runOffsetInputs.innerHTML = html;
+        }
+
+        // Shimadzu DSCデータのパース関数
+        function parseShimadzuData(text, filename) {
+            const lines = text.split('\n');
+            let dataStartIndex = -1;
+            
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes("Time\tTemp\tDSC")) {
+                    dataStartIndex = i;
+                    break;
+                }
+            }
+            
+            if (dataStartIndex === -1) {
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].toLowerCase();
+                    if (line.includes('time') && line.includes('temp') && line.includes('dsc')) {
+                        dataStartIndex = i;
+                        break;
+                    }
+                }
+            }
+            
+            if (dataStartIndex === -1) {
+                throw new Error('データヘッダーが見つかりません。ファイル形式を確認してください。');
+            }
+
+            const dataLines = lines.slice(dataStartIndex + 1).filter(line => line.trim());
+            const data = [];
+            
+            dataLines.forEach((line, lineIndex) => {
+                const parts = line.split('\t');
+                if (parts.length >= 3) {
+                    const time = parseFloat(parts[0]);
+                    const temp = parseFloat(parts[1]) + 273.15;
+                    const dsc = parseFloat(parts[2]);
+                    
+                    if (!isNaN(time) && !isNaN(temp) && !isNaN(dsc)) {
+                        data.push({
+                            time: time,
+                            temp: temp,
+                            dsc: dsc,
+                            filename: filename,
+                            numOfRun: 1
+                        });
+                    }
+                }
+            });
+            
+            return data;
+        }
+
+        // Runオフセットを適用したデータを生成
+        function applyRunOffset(data, fileKey, runNumber) {
+            const offsetInput = document.getElementById(`run_${fileKey}_${runNumber}_offset`);
+            const offset = offsetInput ? parseFloat(offsetInput.value) || 0 : 0;
+            
+            return data.map(point => ({
+                ...point,
+                dsc: point.dsc + offset
+            }));
+        }
+
+        // 範囲を自動設定
+        function setAutoRanges() {
+            if (Object.keys(loadedData).length === 0) return;
+            
+            let minTemp = Infinity, maxTemp = -Infinity;
+            let minTime = Infinity, maxTime = -Infinity;
+            let minDsc = Infinity, maxDsc = -Infinity;
+            
+            Object.values(loadedData).forEach(data => {
+                data.forEach(point => {
+                    minTemp = Math.min(minTemp, point.temp);
+                    maxTemp = Math.max(maxTemp, point.temp);
+                    minTime = Math.min(minTime, point.time);
+                    maxTime = Math.max(maxTime, point.time);
+                    minDsc = Math.min(minDsc, point.dsc);
+                    maxDsc = Math.max(maxDsc, point.dsc);
+                });
+            });
+            
+            document.getElementById('tempMin').value = Math.floor(minTemp);
+            document.getElementById('tempMax').value = Math.ceil(maxTemp);
+            document.getElementById('timeMin').value = Math.floor(minTime);
+            document.getElementById('timeMax').value = Math.ceil(maxTime);
+            document.getElementById('dscMin').value = Math.floor(minDsc);
+            document.getElementById('dscMax').value = Math.ceil(maxDsc);
+        }
+
+        // プロットを更新
+        function updatePlot() {
+            if (Object.keys(loadedData).length === 0) {
+                showStatus('データを先に読み込んでください', 'error');
+                return;
+            }
+
+            updateThermalPlot();
+            updateDscPlot();
+            showStatus('プロットを更新しました');
+        }
+
+        // 熱履歴プロファイルを描画（全Run同時表示）
+        function updateThermalPlot() {
+            const plotType = document.getElementById('plotType').value;
+            const timeMin = parseFloat(document.getElementById('timeMin').value) || null;
+            const timeMax = parseFloat(document.getElementById('timeMax').value) || null;
+            const tempMin = parseFloat(document.getElementById('tempMin').value) || null;
+            const tempMax = parseFloat(document.getElementById('tempMax').value) || null;
+
+            const traces = [];
+            const colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+            let colorIndex = 0;
+
+            // 全Runを一つのプロットに表示
+            Object.keys(runData).forEach((fileKey, fileIndex) => {
+                const runs = runData[fileKey];
+                
+                runs.forEach(run => {
+                    let filteredData = run.data;
+                    
+                    // 時間範囲でフィルタリング
+                    if (timeMin !== null || timeMax !== null) {
+                        filteredData = run.data.filter(point => {
+                            if (timeMin !== null && point.time < timeMin) return false;
+                            if (timeMax !== null && point.time > timeMax) return false;
+                            return true;
+                        });
+                    }
+
+                    // 温度範囲でフィルタリング
+                    if (tempMin !== null || tempMax !== null) {
+                        filteredData = filteredData.filter(point => {
+                            if (tempMin !== null && point.temp < tempMin) return false;
+                            if (tempMax !== null && point.temp > tempMax) return false;
+                            return true;
+                        });
+                    }
+
+                    if (filteredData.length === 0) return;
+
+                    const trace = {
+                        x: filteredData.map(d => d.time),
+                        y: filteredData.map(d => d.temp),
+                        name: `File ${fileIndex + 1} Run-${run.runNumber}`,
+                        line: { color: colors[colorIndex % colors.length] },
+                        marker: { color: colors[colorIndex % colors.length] }
+                    };
+                    setTraceMode(trace, plotType);
+                    traces.push(trace);
+                    colorIndex++;
+                });
+            });
+
+            const layout = {
+                title: 'Thermal Profile (All Runs)',
+                xaxis: { 
+                    title: 'Time (sec)',
+                    tickfont: { size: 14 },
+                    titlefont: { size: 16 }
+                },
+                yaxis: { 
+                    title: 'Temperature (K)',
+                    tickfont: { size: 14 },
+                    titlefont: { size: 16 }
+                },
+                font: { family: 'Times New Roman', size: 14 },
+                legend: {
+                    x: 0.02,
+                    y: 0.98,
+                    bgcolor: 'rgba(255,255,255,0.8)',
+                    bordercolor: 'rgba(0,0,0,0.2)',
+                    borderwidth: 1
+                },
+                margin: { l: 60, r: 30, t: 40, b: 60 }
+            };
+
+            Plotly.newPlot('thermalPlot', traces, layout, {responsive: true});
+        }
+
+        // DSC曲線を描画（オフセットなしとオフセットありの2種類）
+        function updateDscPlot() {
+            const plotType = document.getElementById('plotType').value;
+            const tempMin = parseFloat(document.getElementById('tempMin').value) || null;
+            const tempMax = parseFloat(document.getElementById('tempMax').value) || null;
+            const dscMin = parseFloat(document.getElementById('dscMin').value) || null;
+            const dscMax = parseFloat(document.getElementById('dscMax').value) || null;
+
+            const colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+            let colorIndex = 0;
+
+            // オフセットなしのトレース
+            const tracesWithoutOffset = [];
+            // オフセットありのトレース
+            const tracesWithOffset = [];
+
+            Object.keys(runData).forEach((fileKey, fileIndex) => {
+                const runs = runData[fileKey];
+                
+                runs.forEach(run => {
+                    let filteredData = run.data;
+                    let offsetFilteredData = applyRunOffset(run.data, fileKey, run.runNumber);
+                    
+                    // 温度範囲でフィルタリング
+                    if (tempMin !== null || tempMax !== null) {
+                        filteredData = run.data.filter(point => {
+                            if (tempMin !== null && point.temp < tempMin) return false;
+                            if (tempMax !== null && point.temp > tempMax) return false;
+                            return true;
+                        });
+                        
+                        offsetFilteredData = offsetFilteredData.filter(point => {
+                            if (tempMin !== null && point.temp < tempMin) return false;
+                            if (tempMax !== null && point.temp > tempMax) return false;
+                            return true;
+                        });
+                    }
+
+                    // DSC範囲でフィルタリング（オフセットなし）
+                    if (dscMin !== null || dscMax !== null) {
+                        filteredData = filteredData.filter(point => {
+                            if (dscMin !== null && point.dsc < dscMin) return false;
+                            if (dscMax !== null && point.dsc > dscMax) return false;
+                            return true;
+                        });
+                    }
+
+                    if (filteredData.length === 0) return;
+
+                    // オフセットなしのトレース
+                    const traceWithoutOffset = {
+                        x: filteredData.map(d => d.temp),
+                        y: filteredData.map(d => d.dsc),
+                        name: `File ${fileIndex + 1} Run-${run.runNumber} (No Offset)`,
+                        line: { color: colors[colorIndex % colors.length] },
+                        marker: { color: colors[colorIndex % colors.length] },
+                        xaxis: 'x1',
+                        yaxis: 'y1'
+                    };
+                    setTraceMode(traceWithoutOffset, plotType);
+                    tracesWithoutOffset.push(traceWithoutOffset);
+
+                    // オフセットありのトレース
+                    const traceWithOffset = {
+                        x: offsetFilteredData.map(d => d.temp),
+                        y: offsetFilteredData.map(d => d.dsc),
+                        name: `File ${fileIndex + 1} Run-${run.runNumber} (With Offset)`,
+                        line: { color: colors[colorIndex % colors.length] },
+                        marker: { color: colors[colorIndex % colors.length] },
+                        xaxis: 'x2',
+                        yaxis: 'y2'
+                    };
+                    setTraceMode(traceWithOffset, plotType);
+                    tracesWithOffset.push(traceWithOffset);
+
+                    colorIndex++;
+                });
+            });
+
+            // 2つのサブプロットを作成
+            const traces = [...tracesWithoutOffset, ...tracesWithOffset];
+
+            const layout = {
+                title: 'DSC Curve Comparison',
+                font: { family: 'Times New Roman', size: 14 },
+                grid: {
+                    rows: 2,
+                    columns: 1,
+                    pattern: 'independent'
+                },
+                xaxis: {
+                    title: 'Temperature (K)',
+                    tickfont: { size: 12 },
+                    titlefont: { size: 14 },
+                    domain: [0, 1]
+                },
+                yaxis: {
+                    title: 'DSC (uW) - No Offset',
+                    tickfont: { size: 12 },
+                    titlefont: { size: 14 },
+                    domain: [0.55, 1]
+                },
+                xaxis2: {
+                    title: 'Temperature (K)',
+                    tickfont: { size: 12 },
+                    titlefont: { size: 14 },
+                    domain: [0, 1]
+                },
+                yaxis2: {
+                    title: 'DSC (uW) - With Offset',
+                    tickfont: { size: 12 },
+                    titlefont: { size: 14 },
+                    domain: [0, 0.45]
+                },
+                legend: {
+                    x: 0.02,
+                    y: 0.98,
+                    bgcolor: 'rgba(255,255,255,0.8)',
+                    bordercolor: 'rgba(0,0,0,0.2)',
+                    borderwidth: 1
+                },
+                margin: { l: 60, r: 30, t: 60, b: 60 },
+                height: 800
+            };
+
+            Plotly.newPlot('dscPlot', traces, layout, {responsive: true});
+        }
+
+        // トレースのモードを設定
+        function setTraceMode(trace, plotType) {
+            if (plotType === 'scatter') {
+                trace.mode = 'markers';
+                trace.type = 'scatter';
+            } else if (plotType === 'line') {
+                trace.mode = 'lines';
+                trace.type = 'scatter';
+            } else { // both
+                trace.mode = 'lines+markers';
+                trace.type = 'scatter';
+            }
+        }
+
+        // プロットをリセット
+        function resetPlot() {
+            document.getElementById('tempMin').value = '';
+            document.getElementById('tempMax').value = '';
+            document.getElementById('timeMin').value = '';
+            document.getElementById('timeMax').value = '';
+            document.getElementById('dscMin').value = '';
+            document.getElementById('dscMax').value = '';
+            setAutoRanges();
+            updatePlot();
+        }
+
+        // ページ読み込み時の初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            showStatus('DSCデータローダーが準備できました');
+        });
+    </script>
+</body>
+</html>
